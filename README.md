@@ -252,3 +252,5 @@ This is an in-memory snapshot engine for small graphs, not a graph database. Eac
 ## License
 
 MIT for this project's code. Mangle and other dependencies retain their own licenses.
+
+**For non-technical readers:** [What problem does this project solve?](README_NON_TECHNICAL.md)
