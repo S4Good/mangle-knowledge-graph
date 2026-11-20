@@ -10,6 +10,7 @@ import (
 
 	"codeberg.org/TauCeti/mangle-go/provenance"
 	"mangle-knowledge-graph/internal/graph"
+	"mangle-knowledge-graph/internal/infrastructure"
 	"mangle-knowledge-graph/internal/inventory"
 )
 
@@ -17,12 +18,17 @@ const usage = `Usage: kg [-data facts.mg] [-why] [-input file] [-output file] <c
 
 Commands:
   inventory               Convert Docker CLI JSON Lines into Mangle facts
+  infra-list              List Docker containers
+  infra-deps SERVICE      Show verified service dependencies
+  infra-impact SERVICE    Show potentially affected services
+  infra-explain A B       Explain a verified dependency
   list                    List known technologies
   deps TECHNOLOGY         Direct and transitive prerequisites
   impact TECHNOLOGY       Technologies that depend on TECHNOLOGY
   explain TECH PREREQ     Explain a dependency with Mangle proof trees
 
 Inventory requires -input and -output.
+Infrastructure commands require -input and -dependencies.
 Flags must precede the command. Names may include or omit the leading /.
 Without -data, the embedded demonstration graph is used.
 -why prints up to three proofs for every deps or impact result.
@@ -42,6 +48,7 @@ func run(args []string, out, errOut io.Writer) error {
 	why := fs.Bool("why", false, "explain each result")
 	inputPath := fs.String("input", "", "Docker CLI JSON Lines input")
 	outputPath := fs.String("output", "", "Generated Mangle facts output")
+	depsPath := fs.String("dependencies", "", "Verified dependency JSON file")
 	fs.Usage = func() { fmt.Fprint(errOut, usage) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -54,6 +61,114 @@ func run(args []string, out, errOut io.Writer) error {
 		fs.Usage()
 		return errors.New("command required")
 	}
+
+	if strings.HasPrefix(args[0], "infra-") {
+		if *inputPath == "" || *depsPath == "" {
+			return errors.New("infrastructure commands require -input and -dependencies")
+		}
+		if *data != "" || *outputPath != "" || *why {
+			return errors.New("infrastructure commands do not accept -data, -output or -why")
+		}
+
+		expected := map[string]int{
+			"infra-list":    1,
+			"infra-deps":    2,
+			"infra-impact":  2,
+			"infra-explain": 3,
+		}
+
+		count, ok := expected[args[0]]
+		if !ok || len(args) != count {
+			return errors.New("invalid infrastructure command or argument count")
+		}
+
+		raw, err := os.ReadFile(*inputPath)
+		if err != nil {
+			return fmt.Errorf("read infrastructure inventory: %w", err)
+		}
+
+		containers, err := inventory.ParseDockerCLI(raw)
+		if err != nil {
+			return err
+		}
+		if len(containers) == 0 {
+			return errors.New("infrastructure inventory contains no containers")
+		}
+
+		depData, err := os.ReadFile(*depsPath)
+		if err != nil {
+			return fmt.Errorf("read dependencies: %w", err)
+		}
+
+		dependencies, err := infrastructure.ParseDependencies(depData)
+		if err != nil {
+			return err
+		}
+
+		facts, err := infrastructure.BuildGraphFacts(containers, dependencies)
+		if err != nil {
+			return err
+		}
+
+		g, err := graph.Load(strings.NewReader(facts))
+		if err != nil {
+			return err
+		}
+
+		switch args[0] {
+		case "infra-list":
+			for _, name := range g.Technologies() {
+				if _, err := fmt.Fprintln(out, func() string {
+					decoded, err := infrastructure.DecodeName(name)
+					if err != nil {
+						return name
+					}
+					return decoded
+				}()); err != nil {
+					return err
+				}
+			}
+			return nil
+
+		case "infra-explain":
+			proofs, err := g.Explain("deps", infrastructure.EncodeName(args[1]), infrastructure.EncodeName(args[2]))
+			if errors.Is(err, provenance.ErrNoProof) {
+				_, err = fmt.Fprintln(out, "No verified dependency found.")
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			return provenance.Print(out, proofs)
+
+		default:
+			mode := strings.TrimPrefix(args[0], "infra-")
+			results, err := g.Query(mode, infrastructure.EncodeName(args[1]))
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				_, err = fmt.Fprintln(out, "No verified dependencies found.")
+				return err
+			}
+			for _, result := range results {
+				if _, err := fmt.Fprintln(out, func() string {
+					if len(result.Args) != 2 {
+						return result.String()
+					}
+					decoded, err := infrastructure.DecodeName(result.Args[1].String())
+					if err != nil {
+						return result.String()
+					}
+					return decoded
+				}()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
 	if args[0] == "inventory" {
 		if len(args) != 1 || *inputPath == "" || *outputPath == "" {
 			return errors.New("inventory requires -input and -output")
@@ -92,7 +207,7 @@ func run(args []string, out, errOut io.Writer) error {
 			len(containers), *outputPath)
 		return err
 	}
-	if *inputPath != "" || *outputPath != "" {
+	if *inputPath != "" || *outputPath != "" || *depsPath != "" {
 		return errors.New("-input and -output require inventory")
 	}
 
