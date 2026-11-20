@@ -1,5 +1,7 @@
 # Mangle Knowledge Graph
 
+**For non-technical readers:** [What problem does this project solve?](README_NON_TECHNICAL.md)
+
 A small Go CLI that answers **what a technology depends on, what depends on it, and why**. The maintained [Mangle Go implementation](https://codeberg.org/TauCeti/mangle-go) evaluates recursive rules and produces proof trees; Go handles validated input and the command line.
 
 Built as a focused portfolio project: no database server, API keys, generated answers, or external services at runtime.
@@ -253,4 +255,3 @@ This is an in-memory snapshot engine for small graphs, not a graph database. Eac
 
 MIT for this project's code. Mangle and other dependencies retain their own licenses.
 
-**For non-technical readers:** [What problem does this project solve?](README_NON_TECHNICAL.md)
