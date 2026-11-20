@@ -1,3 +1,7 @@
 /bin/
 /coverage.out
 .DS_Store
+
+# Local inventory and temporary programs
+/tmp/
+/data/inventory/

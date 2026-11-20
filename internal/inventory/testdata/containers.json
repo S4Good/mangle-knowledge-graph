@@ -1,0 +1,13 @@
+[
+  {
+    "Id": "abc123",
+    "Names": ["/ai-qdrant"],
+    "Image": "qdrant/qdrant:v1.15.5",
+    "State": "running",
+    "NetworkSettings": {
+      "Networks": {
+        "ai_default": {}
+      }
+    }
+  }
+]

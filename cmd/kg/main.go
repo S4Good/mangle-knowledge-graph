@@ -10,16 +10,19 @@ import (
 
 	"codeberg.org/TauCeti/mangle-go/provenance"
 	"mangle-knowledge-graph/internal/graph"
+	"mangle-knowledge-graph/internal/inventory"
 )
 
-const usage = `Usage: kg [-data facts.mg] [-why] <command> [technology] [prerequisite]
+const usage = `Usage: kg [-data facts.mg] [-why] [-input file] [-output file] <command> [technology] [prerequisite]
 
 Commands:
+  inventory               Convert Docker CLI JSON Lines into Mangle facts
   list                    List known technologies
   deps TECHNOLOGY         Direct and transitive prerequisites
   impact TECHNOLOGY       Technologies that depend on TECHNOLOGY
   explain TECH PREREQ     Explain a dependency with Mangle proof trees
 
+Inventory requires -input and -output.
 Flags must precede the command. Names may include or omit the leading /.
 Without -data, the embedded demonstration graph is used.
 -why prints up to three proofs for every deps or impact result.
@@ -37,6 +40,8 @@ func run(args []string, out, errOut io.Writer) error {
 	fs.SetOutput(errOut)
 	data := fs.String("data", "", "Mangle facts file (replaces demo)")
 	why := fs.Bool("why", false, "explain each result")
+	inputPath := fs.String("input", "", "Docker CLI JSON Lines input")
+	outputPath := fs.String("output", "", "Generated Mangle facts output")
 	fs.Usage = func() { fmt.Fprint(errOut, usage) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -49,6 +54,48 @@ func run(args []string, out, errOut io.Writer) error {
 		fs.Usage()
 		return errors.New("command required")
 	}
+	if args[0] == "inventory" {
+		if len(args) != 1 || *inputPath == "" || *outputPath == "" {
+			return errors.New("inventory requires -input and -output")
+		}
+		if *data != "" || *why {
+			return errors.New("inventory does not accept -data or -why")
+		}
+
+		raw, err := os.ReadFile(*inputPath)
+		if err != nil {
+			return fmt.Errorf("read inventory: %w", err)
+		}
+
+		containers, err := inventory.ParseDockerCLI(raw)
+		if err != nil {
+			return err
+		}
+		if len(containers) == 0 {
+			return errors.New("inventory contains no containers")
+		}
+
+		facts, err := inventory.GenerateFacts(containers)
+		if err != nil {
+			return err
+		}
+
+		if err := inventory.ValidateFacts(facts); err != nil {
+			return fmt.Errorf("validate generated inventory: %w", err)
+		}
+
+		if err := os.WriteFile(*outputPath, []byte(facts), 0600); err != nil {
+			return fmt.Errorf("write inventory: %w", err)
+		}
+
+		_, err = fmt.Fprintf(out, "Generated Mangle facts for %d containers: %s\n",
+			len(containers), *outputPath)
+		return err
+	}
+	if *inputPath != "" || *outputPath != "" {
+		return errors.New("-input and -output require inventory")
+	}
+
 	want := map[string]int{"list": 1, "deps": 2, "impact": 2, "explain": 3}
 	n, ok := want[args[0]]
 	if !ok || len(args) != n {
