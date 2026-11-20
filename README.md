@@ -101,6 +101,137 @@ Custom data replaces the embedded sample. It must contain only ground `technolog
 
 Cycles are allowed: a nonempty path from a technology back to itself produces a self-dependency. Impact excludes the queried technology itself. An isolated technology is valid and returns no relationships. An empty file is a valid empty graph.
 
+## Real-world infrastructure dependency analysis
+
+This project also demonstrates how Google Mangle can analyze dependencies in a real infrastructure environment.
+
+The application combines Docker inventory data, explicitly declared infrastructure resources, and evidence-backed dependency relationships.
+
+### Architecture
+
+```text
+Docker inventory (JSONL)     External resources (JSON)
+          |                           |
+          +-------------+-------------+
+                        |
+              Dependencies (JSON)
+                        |
+                        v
+                 Go validation
+                        |
+                        v
+                 Mangle engine
+                        |
+             +----------+----------+
+             |          |          |
+             v          v          v
+         Dependencies  Impact   Explanations
+                        |
+                        v
+                    Go CLI
+```
+
+### Real-world HomeLab example
+
+The project was tested against a Docker-based Ubuntu HomeLab and a separate MacBook running Ollama.
+
+The following dependency chain was verified through application configuration, SSH forwarding, and API connectivity:
+
+```text
+Open WebUI (Docker / Ubuntu HomeLab)
+             |
+             v
+SSH remote-forwarding tunnel
+             |
+             v
+Ollama (MacBook)
+```
+
+The graph models configured dependencies, not guaranteed service failures.
+
+### External resources
+
+Infrastructure resources outside Docker can be declared in JSON:
+
+```json
+[
+  {
+    "id": "ollama-ssh-tunnel",
+    "type": "ssh_tunnel",
+    "host": "homelab"
+  },
+  {
+    "id": "macbook-ollama",
+    "type": "service",
+    "host": "macbook"
+  }
+]
+```
+
+### Evidence-backed dependencies
+
+Dependencies are declared separately from the Docker inventory:
+
+```json
+[
+  {
+    "service": "ai-open-webui",
+    "requires": "ollama-ssh-tunnel",
+    "evidence": "Configured Ollama endpoint uses SSH forwarding"
+  },
+  {
+    "service": "ollama-ssh-tunnel",
+    "requires": "macbook-ollama",
+    "evidence": "SSH forwarding and Ollama API connectivity verified"
+  }
+]
+```
+
+The `ai-open-webui` container is supplied by the Docker inventory.
+
+### Infrastructure CLI commands
+
+Assuming the Docker inventory and JSON files are available locally:
+
+```bash
+go run ./cmd/kg -input containers.jsonl -resources resources.json -dependencies dependencies.json infra-list
+
+go run ./cmd/kg -input containers.jsonl -resources resources.json -dependencies dependencies.json infra-deps ai-open-webui
+
+go run ./cmd/kg -input containers.jsonl -resources resources.json -dependencies dependencies.json infra-impact macbook-ollama
+
+go run ./cmd/kg -input containers.jsonl -resources resources.json -dependencies dependencies.json infra-explain ai-open-webui macbook-ollama
+```
+
+The verified dependency query returns:
+
+```text
+macbook-ollama
+ollama-ssh-tunnel
+```
+
+The reverse-impact query for `macbook-ollama` returns:
+
+```text
+ai-open-webui
+ollama-ssh-tunnel
+```
+
+These transitive relationships are inferred by Mangle rather than manually stored as additional dependency edges.
+
+### Engineering considerations
+
+- Docker inventory and dependency evidence are kept separate.
+- Shared Docker networks do not automatically imply dependencies.
+- Input validation rejects invalid resources and unknown dependency endpoints.
+- Cross-host relationships can be represented without requiring all services to run on one machine.
+- Mangle provenance provides explanations for inferred relationships.
+- The analysis uses snapshots and does not continuously monitor service availability.
+- Impact results represent potential dependency consequences, not confirmed outages.
+- Sensitive infrastructure data should not be committed to public repositories.
+
+This demonstrates practical declarative reasoning, Go integration, infrastructure modeling, and explainable dependency analysis.
+
 ## Verify
 
 ```sh
